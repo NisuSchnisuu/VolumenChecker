@@ -7,17 +7,22 @@ let scene, camera, renderer, controls;
 let cuboidMesh, edgesMesh;
 let gridHelper, axesHelper;
 let referenceGroup;
+const clock = new THREE.Clock();
 
 const modelsData = [
-    { file: 'bananaforscale-20cm.glb', size: 20, name: 'Banane 20cm', maxDim: 50 },
-    { file: 'chair-1m.glb', size: 100, name: 'Stuhl 1m', maxDim: 150 },
-    { file: 'human-1.8m.glb', size: 180, name: 'Mensch 1.8m', maxDim: 250 },
-    { file: 'car-3.3m.glb', size: 330, name: 'Auto 3.3m', maxDim: 600 },
-    { file: 'house-9m.glb', size: 900, name: 'Haus 9m', maxDim: 2000 },
-    { file: 'bluewhale-30m.glb', size: 3000, name: 'Blauwal 30m', maxDim: 10000 },
-    { file: 'eiffel tower-330m.glb', size: 33000, name: 'Eiffelturm 330m', maxDim: Infinity }
+    { file: 'bananaforscale-20cm.glb', size: 20, name: 'Banane 20cm', maxDim: 50, rotationY: -Math.PI / 4, paddingFactor: 0.5 },
+    { file: 'chair-1m.glb', size: 100, name: 'Stuhl 1m', maxDim: 150, rotationY: -Math.PI / 4, paddingFactor: 0.5 },
+    { file: 'human-1.8m.glb', size: 180, name: 'Mensch 1.8m', maxDim: 250, rotationY: -Math.PI / 4, paddingFactor: 0.5 },
+    { file: 'car-3.3m.glb', size: 330, name: 'Auto 3.3m', maxDim: 600, rotationY: -Math.PI / 4, paddingFactor: 0.5 },
+    { file: 'house-9m.glb', size: 900, name: 'Haus 9m', maxDim: 2000, rotationY: -Math.PI / 4, paddingFactor: 0.5 },
+    // Der Wal erhält einen expliziten max-Wert, da Skinned Meshes bei Box3 oft fehlschlagen. 
+    // rotationY = 0 sorgt dafür, dass er parallel zur Z-Achse schwimmt und nicht kollidiert.
+    { file: 'bluewhale-30m.glb', size: 3000, name: 'Blauwal 30m', maxDim: 10000, rotationY: 0, paddingFactor: 0.8, trueSizeMax: 30.1 }, 
+    { file: 'eiffel tower-330m.glb', size: 33000, name: 'Eiffelturm 330m', maxDim: Infinity, rotationY: -Math.PI / 4, paddingFactor: 0.5 }
 ];
 const loadedModels = {};
+const mixers = {}; // Speichert die AnimationMixers für die jeweiligen Modelle
+let activeMixer = null;
 
 // --- DOM Elements ---
 const container = document.getElementById('canvas-container');
@@ -98,7 +103,6 @@ function loadAllModels() {
             loadingScreen.style.opacity = '0';
             setTimeout(() => loadingScreen.style.display = 'none', 500);
         }
-        // Initialize reference model selection once everything is loaded
         updateReferenceModel();
     };
 
@@ -106,17 +110,35 @@ function loadAllModels() {
     modelsData.forEach((data, index) => {
         loader.load('./3d-modelle/' + data.file, function(gltf) {
             const model = gltf.scene;
-            const box = new THREE.Box3().setFromObject(model);
-            const center = box.getCenter(new THREE.Vector3());
-            const size = box.getSize(new THREE.Vector3());
-            const max = Math.max(size.x, size.y, size.z);
-            if (max === 0) return;
+            
+            let max;
+            if (data.trueSizeMax) {
+                max = data.trueSizeMax;
+                // Trotz Override wollen wir die Box3 nutzen, um den Mittelpunkt zu finden
+                const box = new THREE.Box3().setFromObject(model);
+                const center = box.getCenter(new THREE.Vector3());
+                model.position.set(-center.x, -center.y, -center.z);
+            } else {
+                const box = new THREE.Box3().setFromObject(model);
+                const center = box.getCenter(new THREE.Vector3());
+                const size = box.getSize(new THREE.Vector3());
+                max = Math.max(size.x, size.y, size.z);
+                if (max === 0) return;
+                model.position.set(-center.x, -center.y, -center.z);
+            }
 
-            model.position.set(-center.x, -center.y, -center.z);
+            // --- ANIMATION MIXER SETUP ---
+            if (gltf.animations && gltf.animations.length > 0) {
+                const mixer = new THREE.AnimationMixer(model);
+                gltf.animations.forEach((clip) => {
+                    mixer.clipAction(clip).play();
+                });
+                mixers[index] = mixer;
+            }
             
             const pivotGroup = new THREE.Group();
             pivotGroup.add(model);
-            pivotGroup.rotation.y = -Math.PI / 4; 
+            pivotGroup.rotation.y = data.rotationY !== undefined ? data.rotationY : -Math.PI / 4; 
 
             const scale = data.size / max;
             const wrapper = new THREE.Group();
@@ -155,15 +177,46 @@ function updateReferenceModel() {
     const targetModel = loadedModels[targetIndex];
     if (targetModel) {
         referenceGroup.add(targetModel);
+        // Aktiven Mixer setzen, falls Animationen vorhanden sind
+        activeMixer = mixers[targetIndex] || null;
+
         if (labelReference) {
             labelReference.textContent = "Grössenreferenz (" + modelsData[targetIndex].name + ")";
         }
     }
 
-    const padding = Math.max(20, maxDim * 0.2);
-    referenceGroup.position.set(0, 0, (l / 2 + padding));
+    const targetData = modelsData[targetIndex];
+    const paddingX = Math.max(targetData.size * targetData.paddingFactor, maxDim * targetData.paddingFactor) + 30;
+    const paddingZ = Math.max(targetData.size * targetData.paddingFactor, maxDim * targetData.paddingFactor) + 30;
+    referenceGroup.position.set(-(w / 2 + paddingX), 0, (l / 2 + paddingZ));
     
     toggleReference();
+}
+
+function adjustCamera() {
+    const l = parseFloat(inputLength.value) || 10;
+    const w = parseFloat(inputWidth.value) || 10;
+    const h = parseFloat(inputHeight.value) || 10;
+    const maxDim = Math.max(l, w, h);
+    
+    if (checkReference.checked) {
+        let targetIndex = modelsData.length - 1;
+        for (let i = 0; i < modelsData.length; i++) {
+            if (maxDim < modelsData[i].maxDim) {
+                targetIndex = i;
+                break;
+            }
+        }
+        const modelSize = modelsData[targetIndex].size;
+        const overallMax = Math.max(maxDim, modelSize);
+        // Faktor 3.5 um sehr grosse Referenzmodelle mitsamt Quader zu sehen
+        camera.position.set(overallMax * 1.5, overallMax * 1.5, overallMax * 3.5);
+    } else {
+        camera.position.set(maxDim * 1.5, maxDim * 1.5, maxDim * 2.5);
+    }
+    
+    controls.target.set(0, h / 2, 0);
+    controls.update();
 }
 
 function createOrUpdateCoords(size) {
@@ -208,10 +261,7 @@ function createCuboid() {
     edgesMesh.visible = true;
     scene.add(edgesMesh);
 
-    camera.position.set(maxDim * 1.5, maxDim * 1.5, maxDim * 2.5);
-    controls.target.set(0, h / 2, 0);
-    controls.update();
-
+    adjustCamera();
     updateMaterial();
 }
 
@@ -237,6 +287,7 @@ function toggleCoords() {
 function toggleReference() {
     if (referenceGroup) {
         referenceGroup.visible = checkReference.checked;
+        adjustCamera();
     }
 }
 
@@ -248,6 +299,13 @@ function onWindowResize() {
 
 function animate() {
     requestAnimationFrame(animate);
+    
+    // --- ANIMATION UPDATE ---
+    const delta = clock.getDelta();
+    if (activeMixer && referenceGroup.visible) {
+        activeMixer.update(delta);
+    }
+    
     controls.update();
     renderer.render(scene, camera);
 }
