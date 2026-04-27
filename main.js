@@ -12,16 +12,17 @@ let dragControls;
 const clock = new THREE.Clock();
 
 const modelsData = [
-    { file: 'bananaforscale-20cm.glb', size: 20, name: 'Banane 20cm', maxDim: 50, rotationY: -Math.PI / 4, paddingFactor: 0.5 },
-    { file: 'chair-1m.glb', size: 100, name: 'Stuhl 1m', maxDim: 150, rotationY: -Math.PI / 4, paddingFactor: 0.5 },
-    { file: 'human-1.8m.glb', size: 180, name: 'Mensch 1.8m', maxDim: 250, rotationY: -Math.PI / 4, paddingFactor: 0.5 },
-    { file: 'car-3.3m.glb', size: 330, name: 'Auto 3.3m', maxDim: 600, rotationY: -Math.PI / 4, paddingFactor: 0.5 },
-    { file: 'house-9m.glb', size: 900, name: 'Haus 9m', maxDim: 2000, rotationY: -Math.PI / 4, paddingFactor: 0.5 },
+    { file: 'Pin-3cm.glb', size: 3, name: 'Pin 3cm', maxDim: 10, rotationY: 0, paddingFactor: 0.5 },
+    { file: 'bananaforscale-20cm.glb', size: 20, name: 'Banane 20cm', maxDim: 50, rotationY: 0, paddingFactor: 0.5 },
+    { file: 'chair-1m.glb', size: 100, name: 'Stuhl 1m', maxDim: 150, rotationY: Math.PI, paddingFactor: 0.5 },
+    { file: 'human-1.8m.glb', size: 180, name: 'Mensch 1.8m', maxDim: 250, rotationY: 0, paddingFactor: 0.5 },
+    { file: 'car-3.3m.glb', size: 330, name: 'Auto 3.3m', maxDim: 600, rotationY: 0, paddingFactor: 0.5 },
+    { file: 'house-9m.glb', size: 900, name: 'Haus 9m', maxDim: 2000, rotationY: 0, paddingFactor: 0.5 },
     // Der Wal erhält einen expliziten max-Wert, da Skinned Meshes bei Box3 oft fehlschlagen. 
     // rotationY = 0 sorgt dafür, dass er parallel zur Z-Achse schwimmt und nicht kollidiert.
     // Blauwal Blender Dims: X: 10.2, Y: 30.1, Z: 5.04. trueSizeMax überschreibt SkinnedMesh-Fehler. hitboxSize fixt die schwebende BoundingBox.
     { file: 'bluewhale-30m.glb', size: 3000, name: 'Blauwal 30m', maxDim: 10000, rotationY: 0, paddingFactor: 0.8, trueSizeMax: 30.1, hitboxSize: [10.2, 30.1, 5.04] }, 
-    { file: 'eiffel tower-330m.glb', size: 33000, name: 'Eiffelturm 330m', maxDim: Infinity, rotationY: -Math.PI / 4, paddingFactor: 0.5 }
+    { file: 'eiffel tower-330m.glb', size: 33000, name: 'Eiffelturm 330m', maxDim: Infinity, rotationY: 0, paddingFactor: 0.5 }
 ];
 const loadedModels = {};
 const mixers = {}; // Speichert die AnimationMixers für die jeweiligen Modelle
@@ -139,14 +140,15 @@ function loadAllModels() {
             
             const pivotGroup = new THREE.Group();
             pivotGroup.add(model);
-            pivotGroup.rotation.y = data.rotationY !== undefined ? data.rotationY : -Math.PI / 4; 
+            pivotGroup.rotation.y = data.rotationY !== undefined ? data.rotationY : 0; 
 
             // Unsichtbare Hitbox hinzufügen, da Skinned Meshes (Animationen) oft Probleme mit Raycastern haben
             // Nutzen der originalen Proportionen (size) anstatt eines gigantischen Würfels (max, max, max), 
             // damit Modelle wie der Wal nicht künstlich hoch in die Luft gehoben werden.
             const hSize = data.hitboxSize ? new THREE.Vector3(data.hitboxSize[0], data.hitboxSize[1], data.hitboxSize[2]) : size;
             const hitboxGeo = new THREE.BoxGeometry(hSize.x, hSize.y, hSize.z);
-            const hitboxMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
+            // Hitbox temporär sichtbar gemacht für Debugging
+            const hitboxMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.3, wireframe: true, depthWrite: false });
             const hitbox = new THREE.Mesh(hitboxGeo, hitboxMat);
             pivotGroup.add(hitbox);
 
@@ -197,9 +199,15 @@ function updateReferenceModel() {
 
     const targetData = modelsData[targetIndex];
     currentActiveModelSize = targetData.size;
-    const paddingX = Math.max(targetData.size * targetData.paddingFactor, maxDim * targetData.paddingFactor) + 30;
-    const paddingZ = Math.max(targetData.size * targetData.paddingFactor, maxDim * targetData.paddingFactor) + 30;
-    referenceGroup.position.set((w / 2 + paddingX), 0, (l / 2 + paddingZ));
+    // Padding skaliert jetzt 100% proportional zur Modellgrösse. 
+    // paddingFactor (z.B. 0.5 = halbe Grösse) + 20% extra als visuelle Lücke.
+    const gap = targetData.size * 0.2;
+    const paddingX = (targetData.size * targetData.paddingFactor) + gap;
+    const paddingZ = (targetData.size * targetData.paddingFactor) + gap;
+    
+    // Position speichern und anwenden, damit wir sie später (z.B. beim Toggle) wiederherstellen können
+    referenceGroup.userData.originalPosition = new THREE.Vector3((w / 2 + paddingX), 0, (l / 2 + paddingZ));
+    referenceGroup.position.copy(referenceGroup.userData.originalPosition);
     
     // Setup Drag Controls
     if (!dragControls) {
@@ -216,8 +224,8 @@ function updateReferenceModel() {
                     if (child.userData.originalEmissive === undefined) {
                         child.userData.originalEmissive = child.material.emissive.getHex();
                     }
-                    // Leichtes Grau/Weiss für das Aufleuchten
-                    child.material.emissive.setHex(0x444444);
+                    // Rotes Aufleuchten
+                    child.material.emissive.setHex(0xff0000);
                 }
             });
         });
@@ -237,6 +245,15 @@ function updateReferenceModel() {
         dragControls.addEventListener('dragstart', function(event) {
             controls.enabled = false; 
             document.body.style.cursor = 'grabbing';
+            
+            // Speichere die aktuelle Kameraposition
+            camera.userData.previousPosition = camera.position.clone();
+            
+            // Wechsle temporär in eine exakte Draufsicht (Top-Down)
+            const dist = camera.position.distanceTo(controls.target);
+            // Ein minimaler Z-Wert (0.01) verhindert den Gimbal-Lock (Kamera kippt sonst auf den Kopf)
+            camera.position.set(controls.target.x, controls.target.y + dist, controls.target.z + 0.01);
+            camera.lookAt(controls.target);
         });
         
         dragControls.addEventListener('drag', function(event) {
@@ -276,6 +293,12 @@ function updateReferenceModel() {
         });
         
         dragControls.addEventListener('dragend', function(event) {
+            // Alte Kameraposition wiederherstellen
+            if (camera.userData.previousPosition) {
+                camera.position.copy(camera.userData.previousPosition);
+                camera.lookAt(controls.target);
+            }
+            
             controls.enabled = true; 
             document.body.style.cursor = 'grab';
         });
@@ -379,6 +402,12 @@ function toggleReference() {
     if (referenceGroup) {
         referenceGroup.visible = checkReference.checked;
         if (dragControls) dragControls.enabled = checkReference.checked;
+        
+        // Position auf die Ausgangsposition zurücksetzen, wenn aktiviert
+        if (checkReference.checked && referenceGroup.userData.originalPosition) {
+            referenceGroup.position.copy(referenceGroup.userData.originalPosition);
+        }
+        
         adjustCamera();
     }
 }
