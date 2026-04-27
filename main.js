@@ -1,12 +1,14 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DragControls } from 'three/addons/controls/DragControls.js';
 
 // --- Global Variables ---
 let scene, camera, renderer, controls;
 let cuboidMesh, edgesMesh;
 let gridHelper, axesHelper;
 let referenceGroup;
+let dragControls;
 const clock = new THREE.Clock();
 
 const modelsData = [
@@ -17,12 +19,14 @@ const modelsData = [
     { file: 'house-9m.glb', size: 900, name: 'Haus 9m', maxDim: 2000, rotationY: -Math.PI / 4, paddingFactor: 0.5 },
     // Der Wal erhält einen expliziten max-Wert, da Skinned Meshes bei Box3 oft fehlschlagen. 
     // rotationY = 0 sorgt dafür, dass er parallel zur Z-Achse schwimmt und nicht kollidiert.
-    { file: 'bluewhale-30m.glb', size: 3000, name: 'Blauwal 30m', maxDim: 10000, rotationY: 0, paddingFactor: 0.8, trueSizeMax: 30.1 }, 
+    // Blauwal Blender Dims: X: 10.2, Y: 30.1, Z: 5.04. trueSizeMax überschreibt SkinnedMesh-Fehler. hitboxSize fixt die schwebende BoundingBox.
+    { file: 'bluewhale-30m.glb', size: 3000, name: 'Blauwal 30m', maxDim: 10000, rotationY: 0, paddingFactor: 0.8, trueSizeMax: 30.1, hitboxSize: [10.2, 30.1, 5.04] }, 
     { file: 'eiffel tower-330m.glb', size: 33000, name: 'Eiffelturm 330m', maxDim: Infinity, rotationY: -Math.PI / 4, paddingFactor: 0.5 }
 ];
 const loadedModels = {};
 const mixers = {}; // Speichert die AnimationMixers für die jeweiligen Modelle
 let activeMixer = null;
+let currentActiveModelSize = 0;
 
 // --- DOM Elements ---
 const container = document.getElementById('canvas-container');
@@ -111,21 +115,18 @@ function loadAllModels() {
         loader.load('./3d-modelle/' + data.file, function(gltf) {
             const model = gltf.scene;
             
+            const box = new THREE.Box3().setFromObject(model);
+            const center = box.getCenter(new THREE.Vector3());
+            const size = box.getSize(new THREE.Vector3());
             let max;
+            
             if (data.trueSizeMax) {
                 max = data.trueSizeMax;
-                // Trotz Override wollen wir die Box3 nutzen, um den Mittelpunkt zu finden
-                const box = new THREE.Box3().setFromObject(model);
-                const center = box.getCenter(new THREE.Vector3());
-                model.position.set(-center.x, -center.y, -center.z);
             } else {
-                const box = new THREE.Box3().setFromObject(model);
-                const center = box.getCenter(new THREE.Vector3());
-                const size = box.getSize(new THREE.Vector3());
                 max = Math.max(size.x, size.y, size.z);
                 if (max === 0) return;
-                model.position.set(-center.x, -center.y, -center.z);
             }
+            model.position.set(-center.x, -center.y, -center.z);
 
             // --- ANIMATION MIXER SETUP ---
             if (gltf.animations && gltf.animations.length > 0) {
@@ -139,6 +140,15 @@ function loadAllModels() {
             const pivotGroup = new THREE.Group();
             pivotGroup.add(model);
             pivotGroup.rotation.y = data.rotationY !== undefined ? data.rotationY : -Math.PI / 4; 
+
+            // Unsichtbare Hitbox hinzufügen, da Skinned Meshes (Animationen) oft Probleme mit Raycastern haben
+            // Nutzen der originalen Proportionen (size) anstatt eines gigantischen Würfels (max, max, max), 
+            // damit Modelle wie der Wal nicht künstlich hoch in die Luft gehoben werden.
+            const hSize = data.hitboxSize ? new THREE.Vector3(data.hitboxSize[0], data.hitboxSize[1], data.hitboxSize[2]) : size;
+            const hitboxGeo = new THREE.BoxGeometry(hSize.x, hSize.y, hSize.z);
+            const hitboxMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
+            const hitbox = new THREE.Mesh(hitboxGeo, hitboxMat);
+            pivotGroup.add(hitbox);
 
             const scale = data.size / max;
             const wrapper = new THREE.Group();
@@ -186,10 +196,91 @@ function updateReferenceModel() {
     }
 
     const targetData = modelsData[targetIndex];
+    currentActiveModelSize = targetData.size;
     const paddingX = Math.max(targetData.size * targetData.paddingFactor, maxDim * targetData.paddingFactor) + 30;
     const paddingZ = Math.max(targetData.size * targetData.paddingFactor, maxDim * targetData.paddingFactor) + 30;
-    referenceGroup.position.set(-(w / 2 + paddingX), 0, (l / 2 + paddingZ));
+    referenceGroup.position.set((w / 2 + paddingX), 0, (l / 2 + paddingZ));
     
+    // Setup Drag Controls
+    if (!dragControls) {
+        dragControls = new DragControls([referenceGroup], camera, renderer.domElement);
+        dragControls.transformGroup = true;
+        
+        dragControls.addEventListener('hoveron', function(event) {
+            controls.enabled = false; // Disable OrbitControls sofort beim Hovern
+            document.body.style.cursor = 'grab';
+            
+            // Leuchteffekt aktivieren
+            event.object.traverse((child) => {
+                if (child.isMesh && child.material && child.material.emissive) {
+                    if (child.userData.originalEmissive === undefined) {
+                        child.userData.originalEmissive = child.material.emissive.getHex();
+                    }
+                    // Leichtes Grau/Weiss für das Aufleuchten
+                    child.material.emissive.setHex(0x444444);
+                }
+            });
+        });
+        
+        dragControls.addEventListener('hoveroff', function(event) {
+            controls.enabled = true; 
+            document.body.style.cursor = 'default';
+            
+            // Leuchteffekt zurücksetzen
+            event.object.traverse((child) => {
+                if (child.isMesh && child.material && child.userData.originalEmissive !== undefined) {
+                    child.material.emissive.setHex(child.userData.originalEmissive);
+                }
+            });
+        });
+        
+        dragControls.addEventListener('dragstart', function(event) {
+            controls.enabled = false; 
+            document.body.style.cursor = 'grabbing';
+        });
+        
+        dragControls.addEventListener('drag', function(event) {
+            // Sperre die Y-Achse, damit das Modell auf dem Boden bleibt
+            event.object.position.y = 0; 
+            
+            // Kollisionsvermeidung mit dem Quader
+            const l = parseFloat(inputLength.value) || 10;
+            const w = parseFloat(inputWidth.value) || 10;
+            
+            // Ein Sicherheitsabstand abhängig von der Grösse des aktuellen Modells (ca. 40%)
+            const safetyRadius = currentActiveModelSize * 0.4;
+            
+            // Ausgedehnte Sperrzone (Quader + Sicherheitsabstand)
+            const expandedMinX = (-w / 2) - safetyRadius;
+            const expandedMaxX = (w / 2) + safetyRadius;
+            const expandedMinZ = (-l / 2) - safetyRadius;
+            const expandedMaxZ = (l / 2) + safetyRadius;
+            
+            const px = event.object.position.x;
+            const pz = event.object.position.z;
+            
+            // Wenn das Objekt in die Sperrzone eindringt, stossen wir es an die nächste Kante zurück
+            if (px > expandedMinX && px < expandedMaxX && pz > expandedMinZ && pz < expandedMaxZ) {
+                const distLeft = px - expandedMinX;
+                const distRight = expandedMaxX - px;
+                const distFront = pz - expandedMinZ;
+                const distBack = expandedMaxZ - pz;
+                
+                const minDist = Math.min(distLeft, distRight, distFront, distBack);
+                
+                if (minDist === distLeft) event.object.position.x = expandedMinX;
+                else if (minDist === distRight) event.object.position.x = expandedMaxX;
+                else if (minDist === distFront) event.object.position.z = expandedMinZ;
+                else if (minDist === distBack) event.object.position.z = expandedMaxZ;
+            }
+        });
+        
+        dragControls.addEventListener('dragend', function(event) {
+            controls.enabled = true; 
+            document.body.style.cursor = 'grab';
+        });
+    }
+
     toggleReference();
 }
 
@@ -287,6 +378,7 @@ function toggleCoords() {
 function toggleReference() {
     if (referenceGroup) {
         referenceGroup.visible = checkReference.checked;
+        if (dragControls) dragControls.enabled = checkReference.checked;
         adjustCamera();
     }
 }
