@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>3D Quader Generator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    
+    <!-- Three.js and OrbitControls via CDN -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    
+    <div class="controls-panel">
+        <h1>Quader Generator</h1>
+        
+        <div class="input-group">
+            <label for="input-length">Länge (cm)</label>
+            <input type="number" id="input-length" min="0.1" step="0.1" placeholder="z.B. 10">
+        </div>
+        
+        <div class="input-group">
+            <label for="input-width">Breite (cm)</label>
+            <input type="number" id="input-width" min="0.1" step="0.1" placeholder="z.B. 10">
+        </div>
+        
+        <div class="input-group">
+            <label for="input-height">Höhe (cm)</label>
+            <input type="number" id="input-height" min="0.1" step="0.1" placeholder="z.B. 10">
+        </div>
+
+        <button id="btn-create">Erstellen</button>
+        
+        <div class="divider"></div>
+        
+        <div class="toggle-group">
+            <label class="toggle">
+                <input type="checkbox" id="check-transparent">
+                <span class="slider"></span>
+            </label>
+            <span class="toggle-label">Transparenter Modus</span>
+        </div>
+        
+        <div class="toggle-group">
+            <label class="toggle">
+                <input type="checkbox" id="check-coords" checked>
+                <span class="slider"></span>
+            </label>
+            <span class="toggle-label">Koordinatensystem</span>
+        </div>
+        
+        <div class="toggle-group">
+            <label class="toggle">
+                <input type="checkbox" id="check-human" checked>
+                <span class="slider"></span>
+            </label>
+            <span class="toggle-label">Grössenreferenz (1.8m)</span>
+        </div>
+    </div>
+
+    <script type="module" src="main.js"></script>
+</body>
+</html>
