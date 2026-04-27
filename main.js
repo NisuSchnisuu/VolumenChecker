@@ -17,7 +17,7 @@ const modelsData = [
     { file: 'chair-1m.glb', size: 100, name: 'Stuhl 1m', maxDim: 150, rotationY: Math.PI, paddingFactor: 0.5 },
     { file: 'human-1.8m.glb', size: 180, name: 'Mensch 1.8m', maxDim: 250, rotationY: 0, paddingFactor: 0.5 },
     { file: 'car-3.3m.glb', size: 330, name: 'Auto 3.3m', maxDim: 600, rotationY: 0, paddingFactor: 0.5 },
-    { file: 'house-9m.glb', size: 900, name: 'Haus 9m', maxDim: 2000, rotationY: 0, paddingFactor: 0.5 },
+    { file: 'house-9m.glb', size: 1000, name: 'Haus 9m', maxDim: 2000, rotationY: 0, paddingFactor: 0.5 },
     // Der Wal erhält einen expliziten max-Wert, da Skinned Meshes bei Box3 oft fehlschlagen. 
     // rotationY = 0 sorgt dafür, dass er parallel zur Z-Achse schwimmt und nicht kollidiert.
     // Blauwal Blender Dims: X: 10.2, Y: 30.1, Z: 5.04. trueSizeMax überschreibt SkinnedMesh-Fehler. hitboxSize fixt die schwebende BoundingBox.
@@ -43,7 +43,7 @@ const labelReference = document.getElementById('label-reference');
 function init() {
     // 1. Scene setup
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x1e293b); // Etwas heller gemacht (Slate 800)
+    scene.background = new THREE.Color(0x0f172a); 
 
     // 2. Camera setup
     camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000000);
@@ -217,29 +217,11 @@ function updateReferenceModel() {
         dragControls.addEventListener('hoveron', function(event) {
             controls.enabled = false; // Disable OrbitControls sofort beim Hovern
             document.body.style.cursor = 'grab';
-            
-            // Leuchteffekt aktivieren
-            event.object.traverse((child) => {
-                if (child.isMesh && child.material && child.material.emissive) {
-                    if (child.userData.originalEmissive === undefined) {
-                        child.userData.originalEmissive = child.material.emissive.getHex();
-                    }
-                    // Rotes Aufleuchten
-                    child.material.emissive.setHex(0xff0000);
-                }
-            });
         });
         
         dragControls.addEventListener('hoveroff', function(event) {
             controls.enabled = true; 
             document.body.style.cursor = 'default';
-            
-            // Leuchteffekt zurücksetzen
-            event.object.traverse((child) => {
-                if (child.isMesh && child.material && child.userData.originalEmissive !== undefined) {
-                    child.material.emissive.setHex(child.userData.originalEmissive);
-                }
-            });
         });
         
         dragControls.addEventListener('dragstart', function(event) {
@@ -290,17 +272,64 @@ function adjustCamera() {
 function createOrUpdateCoords(size) {
     if (gridHelper) scene.remove(gridHelper);
     if (axesHelper) scene.remove(axesHelper);
+    
     gridHelper = new THREE.GridHelper(size, 20, 0x475569, 0x1e293b);
     scene.add(gridHelper);
-    axesHelper = new THREE.AxesHelper(size / 2);
+    
+    // Eigene dicke 3D-Pfeile anstelle des sehr dünnen Standard-AxesHelper
+    axesHelper = new THREE.Group();
+    const thickness = Math.max(0.01, size * 0.0003); // Extrem dünn, fast wie Linien
+    const headRadius = thickness * 6; // Pfeilspitze muss proportional etwas breiter bleiben
+    const headLength = thickness * 12;
+    const bodyLength = size - headLength; // Volle Länge (-size/2 bis +size/2)
+    
+    // Ohne depthTest=false, damit die Achsen ganz natürlich von Objekten verdeckt werden
+    const matX = new THREE.MeshBasicMaterial({ color: 0xef4444 }); 
+    const matY = new THREE.MeshBasicMaterial({ color: 0x22c55e }); 
+    const matZ = new THREE.MeshBasicMaterial({ color: 0x3b82f6 }); 
+    
+    // X Axis (Rot)
+    const meshBodyX = new THREE.Mesh(new THREE.CylinderGeometry(thickness, thickness, bodyLength, 8), matX);
+    meshBodyX.rotation.z = -Math.PI / 2;
+    meshBodyX.position.x = -headLength / 2; // Zentriert die Achse exakt auf den Nullpunkt
+    const meshHeadX = new THREE.Mesh(new THREE.ConeGeometry(headRadius, headLength, 8), matX);
+    meshHeadX.rotation.z = -Math.PI / 2;
+    meshHeadX.position.x = (size / 2) - headLength / 2;
+    axesHelper.add(meshBodyX, meshHeadX);
+    
+    // Y Axis (Grün)
+    const meshBodyY = new THREE.Mesh(new THREE.CylinderGeometry(thickness, thickness, bodyLength, 8), matY);
+    meshBodyY.position.y = -headLength / 2;
+    const meshHeadY = new THREE.Mesh(new THREE.ConeGeometry(headRadius, headLength, 8), matY);
+    meshHeadY.position.y = (size / 2) - headLength / 2;
+    axesHelper.add(meshBodyY, meshHeadY);
+    
+    // Z Axis (Blau)
+    const meshBodyZ = new THREE.Mesh(new THREE.CylinderGeometry(thickness, thickness, bodyLength, 8), matZ);
+    meshBodyZ.rotation.x = Math.PI / 2;
+    meshBodyZ.position.z = -headLength / 2;
+    const meshHeadZ = new THREE.Mesh(new THREE.ConeGeometry(headRadius, headLength, 8), matZ);
+    meshHeadZ.rotation.x = Math.PI / 2;
+    meshHeadZ.position.z = (size / 2) - headLength / 2;
+    axesHelper.add(meshBodyZ, meshHeadZ);
+    
     scene.add(axesHelper);
+    
     toggleCoords();
 }
 
 function createCuboid() {
-    const l = parseFloat(inputLength.value) || 10;
-    const w = parseFloat(inputWidth.value) || 10;
-    const h = parseFloat(inputHeight.value) || 10;
+    if (!inputLength.value || !inputWidth.value || !inputHeight.value) {
+        alert("Bitte fülle alle drei Werte (Länge, Breite, Höhe) aus!");
+        if (!inputLength.value) inputLength.focus();
+        else if (!inputWidth.value) inputWidth.focus();
+        else if (!inputHeight.value) inputHeight.focus();
+        return;
+    }
+
+    const l = parseFloat(inputLength.value);
+    const w = parseFloat(inputWidth.value);
+    const h = parseFloat(inputHeight.value);
     if (cuboidMesh) scene.remove(cuboidMesh);
     if (edgesMesh) scene.remove(edgesMesh);
 
@@ -322,11 +351,40 @@ function createCuboid() {
     cuboidMesh.position.y = h / 2;
     scene.add(cuboidMesh);
 
-    const edgesGeometry = new THREE.EdgesGeometry(geometry);
-    const edgesMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 });
-    edgesMesh = new THREE.LineSegments(edgesGeometry, edgesMaterial);
+    // Ersetze die fehleranfälligen LineSegments durch echte 3D-Zylinder, die sauber mitskalieren
+    edgesMesh = new THREE.Group();
+    // Die Mindestdicke reduziert, damit kleine Quader keine zu fetten Kanten haben.
+    const edgeThickness = Math.max(0.02, maxDim * 0.0015);
+    const edgeMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    
+    function addEdge(len, rotX, rotZ, posX, posY, posZ) {
+        const cyl = new THREE.Mesh(new THREE.CylinderGeometry(edgeThickness, edgeThickness, len, 8), edgeMaterial);
+        cyl.rotation.set(rotX, 0, rotZ);
+        cyl.position.set(posX, posY, posZ);
+        edgesMesh.add(cyl);
+    }
+    
+    const hw = w/2, hh = h/2, hl = l/2;
+    
+    // 4 Kanten entlang der X-Achse (Breite)
+    addEdge(w, 0, Math.PI/2, 0, hh, hl);
+    addEdge(w, 0, Math.PI/2, 0, hh, -hl);
+    addEdge(w, 0, Math.PI/2, 0, -hh, hl);
+    addEdge(w, 0, Math.PI/2, 0, -hh, -hl);
+    
+    // 4 Kanten entlang der Y-Achse (Höhe)
+    addEdge(h, 0, 0, hw, 0, hl);
+    addEdge(h, 0, 0, hw, 0, -hl);
+    addEdge(h, 0, 0, -hw, 0, hl);
+    addEdge(h, 0, 0, -hw, 0, -hl);
+    
+    // 4 Kanten entlang der Z-Achse (Länge)
+    addEdge(l, Math.PI/2, 0, hw, hh, 0);
+    addEdge(l, Math.PI/2, 0, hw, -hh, 0);
+    addEdge(l, Math.PI/2, 0, -hw, hh, 0);
+    addEdge(l, Math.PI/2, 0, -hw, -hh, 0);
+
     edgesMesh.position.y = h / 2;
-    edgesMesh.visible = true;
     scene.add(edgesMesh);
 
     adjustCamera();
