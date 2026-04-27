@@ -1,10 +1,23 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 // --- Global Variables ---
 let scene, camera, renderer, controls;
 let cuboidMesh, edgesMesh;
-let gridHelper, axesHelper, humanHelper;
+let gridHelper, axesHelper;
+let referenceGroup;
+
+const modelsData = [
+    { file: 'bananaforscale-20cm.glb', size: 20, name: 'Banane 20cm', maxDim: 50 },
+    { file: 'chair-1m.glb', size: 100, name: 'Stuhl 1m', maxDim: 150 },
+    { file: 'human-1.8m.glb', size: 180, name: 'Mensch 1.8m', maxDim: 250 },
+    { file: 'car-3.3m.glb', size: 330, name: 'Auto 3.3m', maxDim: 600 },
+    { file: 'house-9m.glb', size: 900, name: 'Haus 9m', maxDim: 2000 },
+    { file: 'bluewhale-30m.glb', size: 3000, name: 'Blauwal 30m', maxDim: 10000 },
+    { file: 'eiffel tower-330m.glb', size: 33000, name: 'Eiffelturm 330m', maxDim: Infinity }
+];
+const loadedModels = {};
 
 // --- DOM Elements ---
 const container = document.getElementById('canvas-container');
@@ -14,13 +27,12 @@ const inputWidth = document.getElementById('input-width');
 const inputHeight = document.getElementById('input-height');
 const checkTransparent = document.getElementById('check-transparent');
 const checkCoords = document.getElementById('check-coords');
-const checkHuman = document.getElementById('check-human');
+const checkReference = document.getElementById('check-reference');
+const labelReference = document.getElementById('label-reference');
 
-// --- Initialization ---
 function init() {
     // 1. Scene setup
     scene = new THREE.Scene();
-    // Dark background matching the CSS theme
     scene.background = new THREE.Color(0x0f172a); 
 
     // 2. Camera setup
@@ -33,90 +45,134 @@ function init() {
     renderer.setPixelRatio(window.devicePixelRatio);
     container.appendChild(renderer.domElement);
 
-    // 4. OrbitControls (for iPad touch and mouse interaction)
+    // 4. OrbitControls
     controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
-    controls.zoomSpeed = 2.0; // Increased zoom sensitivity
+    controls.zoomSpeed = 2.0;
 
     // 5. Lighting
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
     scene.add(ambientLight);
-
     const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.8);
     dirLight1.position.set(10, 20, 10);
     scene.add(dirLight1);
-
     const dirLight2 = new THREE.DirectionalLight(0xffffff, 0.5);
     dirLight2.position.set(-10, -20, -10);
     scene.add(dirLight2);
 
-    // 6. Coordinate System (Grid & Axes) default
-    createOrUpdateCoords(50); // Initial default size
+    // 6. Coordinate System default
+    createOrUpdateCoords(50); 
 
-    // 7. Human Reference
-    createHumanHelper();
+    // 7. References Group
+    referenceGroup = new THREE.Group();
+    scene.add(referenceGroup);
 
     // 8. Event Listeners
     window.addEventListener('resize', onWindowResize);
     btnCreate.addEventListener('click', createCuboid);
     checkTransparent.addEventListener('change', updateMaterial);
     checkCoords.addEventListener('change', toggleCoords);
-    checkHuman.addEventListener('change', toggleHuman);
+    checkReference.addEventListener('change', toggleReference);
+
+    // Start loading models
+    loadAllModels();
 
     // Start Animation Loop
     animate();
 }
 
-// --- Functions ---
+function loadAllModels() {
+    const manager = new THREE.LoadingManager();
+    manager.onProgress = function (url, itemsLoaded, itemsTotal) {
+        const percent = Math.floor((itemsLoaded / itemsTotal) * 100);
+        const progressBar = document.getElementById('progress-bar');
+        const loadingText = document.getElementById('loading-text');
+        if (progressBar) progressBar.style.width = percent + '%';
+        if (loadingText) loadingText.textContent = percent + '%';
+    };
 
-function createHumanHelper() {
-    humanHelper = new THREE.Group();
+    manager.onLoad = function () {
+        const loadingScreen = document.getElementById('loading-screen');
+        if (loadingScreen) {
+            loadingScreen.style.opacity = '0';
+            setTimeout(() => loadingScreen.style.display = 'none', 500);
+        }
+        // Initialize reference model selection once everything is loaded
+        updateReferenceModel();
+    };
 
-    const material = new THREE.MeshStandardMaterial({
-        color: 0x94a3b8, // Slate gray
-        roughness: 0.7,
-        metalness: 0.1,
+    const loader = new GLTFLoader(manager);
+    modelsData.forEach((data, index) => {
+        loader.load('./3d-modelle/' + data.file, function(gltf) {
+            const model = gltf.scene;
+            const box = new THREE.Box3().setFromObject(model);
+            const center = box.getCenter(new THREE.Vector3());
+            const size = box.getSize(new THREE.Vector3());
+            const max = Math.max(size.x, size.y, size.z);
+            if (max === 0) return;
+
+            model.position.set(-center.x, -center.y, -center.z);
+            
+            const pivotGroup = new THREE.Group();
+            pivotGroup.add(model);
+            pivotGroup.rotation.y = -Math.PI / 4; 
+
+            const scale = data.size / max;
+            const wrapper = new THREE.Group();
+            wrapper.add(pivotGroup);
+            wrapper.scale.set(scale, scale, scale);
+            
+            wrapper.updateMatrixWorld(true);
+            const wrapperBox = new THREE.Box3().setFromObject(wrapper);
+            wrapper.position.y = -wrapperBox.min.y;
+            
+            loadedModels[index] = wrapper;
+        });
     });
+}
 
-    // Kopf (Mitte bei y=169, Höhe 22 => Spitze bei 180cm)
-    const head = new THREE.Mesh(new THREE.BoxGeometry(18, 22, 20), material);
-    head.position.set(0, 169, 0);
+function updateReferenceModel() {
+    if (!referenceGroup) return;
 
-    // Torso
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(36, 56, 20), material);
-    torso.position.set(0, 130, 0);
+    while(referenceGroup.children.length > 0) {
+        referenceGroup.remove(referenceGroup.children[0]);
+    }
 
-    // Beine
-    const legGeo = new THREE.BoxGeometry(14, 85, 14);
-    const legL = new THREE.Mesh(legGeo, material);
-    legL.position.set(-10, 42.5, 0);
-    const legR = new THREE.Mesh(legGeo, material);
-    legR.position.set(10, 42.5, 0);
+    const l = parseFloat(inputLength.value) || 10;
+    const w = parseFloat(inputWidth.value) || 10;
+    const h = parseFloat(inputHeight.value) || 10;
+    const maxDim = Math.max(l, w, h);
 
-    // Arme
-    const armGeo = new THREE.BoxGeometry(12, 60, 12);
-    const armL = new THREE.Mesh(armGeo, material);
-    armL.position.set(-25, 128, 0);
-    const armR = new THREE.Mesh(armGeo, material);
-    armR.position.set(25, 128, 0);
+    let targetIndex = modelsData.length - 1; // Default to largest
+    for (let i = 0; i < modelsData.length; i++) {
+        if (maxDim < modelsData[i].maxDim) {
+            targetIndex = i;
+            break;
+        }
+    }
 
-    humanHelper.add(head, torso, legL, legR, armL, armR);
-    scene.add(humanHelper);
+    const targetModel = loadedModels[targetIndex];
+    if (targetModel) {
+        referenceGroup.add(targetModel);
+        if (labelReference) {
+            labelReference.textContent = "Grössenreferenz (" + modelsData[targetIndex].name + ")";
+        }
+    }
+
+    const padding = Math.max(20, maxDim * 0.2);
+    referenceGroup.position.set(0, 0, (l / 2 + padding));
     
-    toggleHuman();
+    toggleReference();
 }
 
 function createOrUpdateCoords(size) {
     if (gridHelper) scene.remove(gridHelper);
     if (axesHelper) scene.remove(axesHelper);
-
     gridHelper = new THREE.GridHelper(size, 20, 0x475569, 0x1e293b);
     scene.add(gridHelper);
-
     axesHelper = new THREE.AxesHelper(size / 2);
     scene.add(axesHelper);
-
     toggleCoords();
 }
 
@@ -124,28 +180,16 @@ function createCuboid() {
     const l = parseFloat(inputLength.value) || 10;
     const w = parseFloat(inputWidth.value) || 10;
     const h = parseFloat(inputHeight.value) || 10;
-
-    // Remove existing meshes if they exist
     if (cuboidMesh) scene.remove(cuboidMesh);
     if (edgesMesh) scene.remove(edgesMesh);
 
     const maxDim = Math.max(l, w, h);
+    createOrUpdateCoords(maxDim * 3);
+    updateReferenceModel();
 
-    // Update Coordinate System to fit
-    createOrUpdateCoords(maxDim * 3); // Grid 3 times the max dimension
-
-    // Position human helper outside the cuboid (front-left corner)
-    if (humanHelper) {
-        humanHelper.position.set(-(w / 2 + 40), 0, (l / 2 + 40));
-    }
-
-    // Create Geometry
-    // In Three.js usually Y is up, so Height maps to Y, Width to X, Length to Z.
     const geometry = new THREE.BoxGeometry(w, h, l);
-
-    // Create Material (transparent: true is set initially to fix toggling issues)
     const material = new THREE.MeshStandardMaterial({
-        color: 0x3b82f6, // Accent color
+        color: 0x3b82f6,
         roughness: 0.2,
         metalness: 0.1,
         transparent: true,
@@ -154,23 +198,16 @@ function createCuboid() {
     });
 
     cuboidMesh = new THREE.Mesh(geometry, material);
-    
-    // Position it so the bottom rests on the grid
     cuboidMesh.position.y = h / 2;
-
     scene.add(cuboidMesh);
 
-    // Create Edges
     const edgesGeometry = new THREE.EdgesGeometry(geometry);
     const edgesMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 });
     edgesMesh = new THREE.LineSegments(edgesGeometry, edgesMaterial);
     edgesMesh.position.y = h / 2;
-    edgesMesh.visible = true; // Always show edges
-    
+    edgesMesh.visible = true;
     scene.add(edgesMesh);
 
-    // Adjust Camera to fit new size
-    // Zoom out enough to show the entire object (2.5 multiplier)
     camera.position.set(maxDim * 1.5, maxDim * 1.5, maxDim * 2.5);
     controls.target.set(0, h / 2, 0);
     controls.update();
@@ -181,7 +218,6 @@ function createCuboid() {
 function updateMaterial() {
     if (!cuboidMesh) return;
     const isTransparent = checkTransparent.checked;
-
     if (isTransparent) {
         cuboidMesh.material.opacity = 0.2;
         cuboidMesh.material.depthWrite = false;
@@ -194,13 +230,13 @@ function updateMaterial() {
 
 function toggleCoords() {
     const show = checkCoords.checked;
-    gridHelper.visible = show;
-    axesHelper.visible = show;
+    if (gridHelper) gridHelper.visible = show;
+    if (axesHelper) axesHelper.visible = show;
 }
 
-function toggleHuman() {
-    if (humanHelper) {
-        humanHelper.visible = checkHuman.checked;
+function toggleReference() {
+    if (referenceGroup) {
+        referenceGroup.visible = checkReference.checked;
     }
 }
 
@@ -212,9 +248,8 @@ function onWindowResize() {
 
 function animate() {
     requestAnimationFrame(animate);
-    controls.update(); // required if controls.enableDamping or controls.autoRotate are set
+    controls.update();
     renderer.render(scene, camera);
 }
 
-// --- Start ---
 init();

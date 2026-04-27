@@ -20,6 +20,16 @@
     </script>
 </head>
 <body>
+    <div id="loading-screen">
+        <div class="loading-content">
+            <h2>Lade 3D Modelle...</h2>
+            <div class="progress-bar-container">
+                <div id="progress-bar"></div>
+            </div>
+            <p id="loading-text">0%</p>
+        </div>
+    </div>
+
     <div id="canvas-container"></div>
     
     <div class="controls-panel">
@@ -27,17 +37,17 @@
         
         <div class="input-group">
             <label for="input-length">Länge (cm)</label>
-            <input type="number" id="input-length" min="0.1" step="0.1" placeholder="z.B. 10">
+            <input type="number" id="input-length" min="0.1" step="0.1">
         </div>
         
         <div class="input-group">
             <label for="input-width">Breite (cm)</label>
-            <input type="number" id="input-width" min="0.1" step="0.1" placeholder="z.B. 10">
+            <input type="number" id="input-width" min="0.1" step="0.1">
         </div>
         
         <div class="input-group">
             <label for="input-height">Höhe (cm)</label>
-            <input type="number" id="input-height" min="0.1" step="0.1" placeholder="z.B. 10">
+            <input type="number" id="input-height" min="0.1" step="0.1">
         </div>
 
         <button id="btn-create">Erstellen</button>
@@ -62,10 +72,10 @@
         
         <div class="toggle-group">
             <label class="toggle">
-                <input type="checkbox" id="check-human" checked>
+                <input type="checkbox" id="check-reference">
                 <span class="slider"></span>
             </label>
-            <span class="toggle-label">Grössenreferenz (1.8m)</span>
+            <span class="toggle-label" id="label-reference">Grössenreferenz</span>
         </div>
     </div>
 
