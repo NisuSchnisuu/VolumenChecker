@@ -43,7 +43,7 @@ const labelReference = document.getElementById('label-reference');
 function init() {
     // 1. Scene setup
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0f172a); 
+    scene.background = new THREE.Color(0x1e293b); // Etwas heller gemacht (Slate 800)
 
     // 2. Camera setup
     camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000000);
@@ -147,8 +147,8 @@ function loadAllModels() {
             // damit Modelle wie der Wal nicht künstlich hoch in die Luft gehoben werden.
             const hSize = data.hitboxSize ? new THREE.Vector3(data.hitboxSize[0], data.hitboxSize[1], data.hitboxSize[2]) : size;
             const hitboxGeo = new THREE.BoxGeometry(hSize.x, hSize.y, hSize.z);
-            // Hitbox temporär sichtbar gemacht für Debugging
-            const hitboxMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.3, wireframe: true, depthWrite: false });
+            // Hitbox wieder unsichtbar gemacht
+            const hitboxMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
             const hitbox = new THREE.Mesh(hitboxGeo, hitboxMat);
             pivotGroup.add(hitbox);
 
@@ -245,60 +245,14 @@ function updateReferenceModel() {
         dragControls.addEventListener('dragstart', function(event) {
             controls.enabled = false; 
             document.body.style.cursor = 'grabbing';
-            
-            // Speichere die aktuelle Kameraposition
-            camera.userData.previousPosition = camera.position.clone();
-            
-            // Wechsle temporär in eine exakte Draufsicht (Top-Down)
-            const dist = camera.position.distanceTo(controls.target);
-            // Ein minimaler Z-Wert (0.01) verhindert den Gimbal-Lock (Kamera kippt sonst auf den Kopf)
-            camera.position.set(controls.target.x, controls.target.y + dist, controls.target.z + 0.01);
-            camera.lookAt(controls.target);
         });
         
         dragControls.addEventListener('drag', function(event) {
             // Sperre die Y-Achse, damit das Modell auf dem Boden bleibt
             event.object.position.y = 0; 
-            
-            // Kollisionsvermeidung mit dem Quader
-            const l = parseFloat(inputLength.value) || 10;
-            const w = parseFloat(inputWidth.value) || 10;
-            
-            // Ein Sicherheitsabstand abhängig von der Grösse des aktuellen Modells (ca. 40%)
-            const safetyRadius = currentActiveModelSize * 0.4;
-            
-            // Ausgedehnte Sperrzone (Quader + Sicherheitsabstand)
-            const expandedMinX = (-w / 2) - safetyRadius;
-            const expandedMaxX = (w / 2) + safetyRadius;
-            const expandedMinZ = (-l / 2) - safetyRadius;
-            const expandedMaxZ = (l / 2) + safetyRadius;
-            
-            const px = event.object.position.x;
-            const pz = event.object.position.z;
-            
-            // Wenn das Objekt in die Sperrzone eindringt, stossen wir es an die nächste Kante zurück
-            if (px > expandedMinX && px < expandedMaxX && pz > expandedMinZ && pz < expandedMaxZ) {
-                const distLeft = px - expandedMinX;
-                const distRight = expandedMaxX - px;
-                const distFront = pz - expandedMinZ;
-                const distBack = expandedMaxZ - pz;
-                
-                const minDist = Math.min(distLeft, distRight, distFront, distBack);
-                
-                if (minDist === distLeft) event.object.position.x = expandedMinX;
-                else if (minDist === distRight) event.object.position.x = expandedMaxX;
-                else if (minDist === distFront) event.object.position.z = expandedMinZ;
-                else if (minDist === distBack) event.object.position.z = expandedMaxZ;
-            }
         });
         
         dragControls.addEventListener('dragend', function(event) {
-            // Alte Kameraposition wiederherstellen
-            if (camera.userData.previousPosition) {
-                camera.position.copy(camera.userData.previousPosition);
-                camera.lookAt(controls.target);
-            }
-            
             controls.enabled = true; 
             document.body.style.cursor = 'grab';
         });
